@@ -5,7 +5,7 @@ use std::error::Error;
 use std::sync::{Arc, RwLock};
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 enum TransactionType {
     #[serde(rename = "deposit")]
     Deposit,
@@ -93,6 +93,28 @@ impl Account {
         }
     }
 
+    fn dispute(&mut self, transaction_id: u32) -> Result<(), String> {
+        match self.transactions_history.get(&transaction_id) {
+            Some(transaction) => {
+                if transaction.transaction_type == TransactionType::Deposit {
+                    let amount = transaction
+                        .amount
+                        .expect("Transaction stored in transaction_history is valid!");
+                    self.available -= amount;
+                    self.held += amount;
+                    Ok(())
+                } else {
+                    Err("Dirpute transaction target was different than Deposit!".into())
+                }
+            }
+            None => Err("Dispute transaction target not valid".into()),
+        }
+    }
+
+    fn resolve(&mut self, dispute_id: u32) -> Result<(), String> -> {
+
+    }
+
     fn process_pending_transaction(&mut self) -> Result<(), String> {
         self.is_account_state_valid_for_transaction()?;
         let transaction = match self.pending_transactions.pop_front() {
@@ -108,7 +130,7 @@ impl Account {
                     }
                 };
 
-                self.deposit(amount)?
+                self.deposit(amount)?;
             }
             TransactionType::Withdrawal => {
                 let amount = match transaction.amount {
@@ -120,7 +142,9 @@ impl Account {
 
                 self.withdraw(amount)?;
             }
-            TransactionType::Dispute => (),
+            TransactionType::Dispute => {
+                self.dispute(transaction.tx)?;
+            }
             TransactionType::Resolve => (),
             TransactionType::Chargeback => (),
         }
