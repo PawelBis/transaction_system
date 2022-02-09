@@ -251,6 +251,8 @@ mod tests {
         assert_eq!(acc.available, 10.0);
         assert_eq!(acc.total, 10.0);
         const TRANSACTION_TO_DISPUTE_ID: u32 = 5;
+        const INVALID_DISPUTE_ID: u32 = 999;
+        const WITHDRAW_TRANSACTION_ID: u32 = 10;
 
         let deposit_transaction = Transaction::new(
             TransactionType::Deposit,
@@ -269,5 +271,26 @@ mod tests {
         assert_eq!(acc.total, 15.0);
         assert_eq!(acc.available, 10.0);
         assert_eq!(acc.held, 5.0);
+
+        let invalid_dispute =
+            Transaction::new(TransactionType::Dispute, 0, INVALID_DISPUTE_ID, None);
+        acc.add_transaction(invalid_dispute);
+        assert!(acc.process_pending_transaction().is_err());
+
+        let withdraw_transaction = Transaction::new(
+            TransactionType::Withdrawal,
+            0,
+            INVALID_DISPUTE_ID,
+            Some(1.0),
+        );
+        acc.add_transaction(withdraw_transaction);
+        acc.process_pending_transaction().unwrap();
+        assert_eq!(acc.total, 14.0);
+        assert_eq!(acc.available, 9.0);
+
+        let another_invalid_dispute =
+            Transaction::new(TransactionType::Dispute, 0, WITHDRAW_TRANSACTION_ID, None);
+        acc.add_transaction(another_invalid_dispute);
+        assert!(acc.process_pending_transaction().is_err());
     }
 }
