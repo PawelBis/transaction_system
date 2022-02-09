@@ -51,6 +51,10 @@ impl Account {
         }
     }
 
+    fn assert_balance(&self) {
+        assert_eq!(self.total, self.available + self.held);
+    }
+
     fn is_account_state_valid_for_transaction(&self) -> Result<(), String> {
         if self.locked {
             Err("Account locked!".into())
@@ -65,7 +69,7 @@ impl Account {
         if amount > 0.0 {
             self.available += amount;
             self.total += amount;
-            assert_eq!(self.total, self.available + self.held);
+            self.assert_balance();
             Ok(())
         } else {
             Err(format!("deposit amount: {} is not valid", amount).into())
@@ -79,7 +83,7 @@ impl Account {
             if self.available - amount >= 0.0 {
                 self.total -= amount;
                 self.available -= amount;
-                assert_eq!(self.total, self.available + self.held);
+                self.assert_balance();
                 Ok(())
             } else {
                 Err(format!(
@@ -94,14 +98,17 @@ impl Account {
     }
 
     fn dispute(&mut self, transaction_id: u32) -> Result<(), String> {
-        match self.transactions_history.get(&transaction_id) {
+        match self.transactions_history.get_mut(&transaction_id) {
             Some(transaction) => {
                 if transaction.transaction_type == TransactionType::Deposit {
                     let amount = transaction
                         .amount
-                        .expect("Transaction stored in transaction_history is valid!");
+                        .expect("Transaction stored in transaction_history is valid");
+
+                    transaction.transaction_type = TransactionType::Dispute;
                     self.available -= amount;
                     self.held += amount;
+                    self.assert_balance();
                     Ok(())
                 } else {
                     Err("Dirpute transaction target was different than Deposit!".into())
@@ -111,8 +118,51 @@ impl Account {
         }
     }
 
-    fn resolve(&mut self, dispute_id: u32) -> Result<(), String> -> {
+    fn resolve(&mut self, dispute_id: u32) -> Result<(), String> {
+        if let Some(dispute_transaction) = self.transactions_history.get_mut(&dispute_id) {
+            if dispute_transaction.transaction_type != TransactionType::Dispute {
+                return Err("Resolve transaction target was different than Dispute!".into());
+            }
 
+            let amount = dispute_transaction
+                .amount
+                .expect("Dispute transaction stored in history contains amount resolve");
+
+            dispute_transaction.transaction_type = TransactionType::Deposit;
+            self.held -= amount;
+            self.available += amount;
+            self.assert_balance();
+            return Ok(());
+        }
+
+        Err(format!(
+            "Transaction {} is not stored in transaction history",
+            dispute_id
+        ))
+    }
+
+    fn chargeback(&mut self, dispute_id: u32) -> Result<(), String> {
+        if let Some(dispute_transaction) = self.transactions_history.get_mut(&dispute_id) {
+            if dispute_transaction.transaction_type != TransactionType::Dispute {
+                return Err("Resolve transaction target was different than Dispute!".into());
+            }
+
+            let amount = dispute_transaction
+                .amount
+                .expect("Dispute transaction stored in history contains amount");
+
+            dispute_transaction.transaction_type = TransactionType::Chargeback;
+            self.held -= amount;
+            self.total -= amount;
+            self.locked = true;
+            self.assert_balance();
+            return Ok(());
+        }
+
+        Err(format!(
+            "Transaction {} is not stored in transaction history",
+            dispute_id
+        ))
     }
 
     fn process_pending_transaction(&mut self) -> Result<(), String> {
@@ -131,6 +181,8 @@ impl Account {
                 };
 
                 self.deposit(amount)?;
+                self.transactions_history
+                    .insert(transaction.tx, transaction);
             }
             TransactionType::Withdrawal => {
                 let amount = match transaction.amount {
@@ -141,15 +193,19 @@ impl Account {
                 };
 
                 self.withdraw(amount)?;
+                self.transactions_history
+                    .insert(transaction.tx, transaction);
             }
             TransactionType::Dispute => {
                 self.dispute(transaction.tx)?;
             }
-            TransactionType::Resolve => (),
-            TransactionType::Chargeback => (),
+            TransactionType::Resolve => {
+                self.resolve(transaction.tx)?;
+            }
+            TransactionType::Chargeback => {
+                self.chargeback(transaction.tx)?;
+            }
         }
-        self.transactions_history
-            .insert(transaction.tx, transaction);
         Ok(())
     }
 }
