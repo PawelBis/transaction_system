@@ -187,31 +187,32 @@ impl Account {
 mod tests {
     use super::{Account, Transaction, TransactionType};
 
-    #[test]
-    fn deposit() {
+    fn prepare_acc(initial_funds: f32) -> Account {
         let mut acc = Account::new(
             0,
-            Transaction::new(TransactionType::Deposit, 0, 0, Some(5.0)),
+            Transaction::new(TransactionType::Deposit, 0, 0, Some(initial_funds)),
         );
         acc.process_pending_transaction().unwrap();
-        assert!(acc.available == 5.0);
-        assert!(acc.total == 5.0);
+        acc
+    }
+
+    #[test]
+    fn deposit() {
+        let mut acc = prepare_acc(5.0);
+        assert_eq!(acc.available, 5.0);
+        assert_eq!(acc.total, 5.0);
 
         acc.add_transaction(Transaction::new(TransactionType::Deposit, 0, 1, Some(-5.0)));
         assert!(acc.process_pending_transaction().is_err());
-        assert!(acc.available == 5.0);
-        assert!(acc.total == 5.0);
+        assert_eq!(acc.available, 5.0);
+        assert_eq!(acc.total, 5.0);
     }
 
     #[test]
     fn withdraw() {
-        let mut acc = Account::new(
-            0,
-            Transaction::new(TransactionType::Deposit, 0, 0, Some(10.0)),
-        );
-        acc.process_pending_transaction().unwrap();
-        assert!(acc.available == 10.0);
-        assert!(acc.total == 10.0);
+        let mut acc = prepare_acc(10.0);
+        assert_eq!(acc.available, 10.0);
+        assert_eq!(acc.total, 10.0);
 
         acc.add_transaction(Transaction::new(
             TransactionType::Withdrawal,
@@ -220,8 +221,8 @@ mod tests {
             Some(5.0),
         ));
         acc.process_pending_transaction().unwrap();
-        assert!(acc.available == 5.0);
-        assert!(acc.total == 5.0);
+        assert_eq!(acc.available, 5.0);
+        assert_eq!(acc.total, 5.0);
 
         acc.add_transaction(Transaction::new(
             TransactionType::Withdrawal,
@@ -230,8 +231,8 @@ mod tests {
             Some(6.0),
         ));
         assert!(acc.process_pending_transaction().is_err());
-        assert!(acc.available == 5.0);
-        assert!(acc.total == 5.0);
+        assert_eq!(acc.available, 5.0);
+        assert_eq!(acc.total, 5.0);
 
         acc.add_transaction(Transaction::new(
             TransactionType::Withdrawal,
@@ -240,7 +241,33 @@ mod tests {
             Some(-1.0),
         ));
         assert!(acc.process_pending_transaction().is_err());
-        assert!(acc.available == 5.0);
-        assert!(acc.total == 5.0);
+        assert_eq!(acc.available, 5.0);
+        assert_eq!(acc.total, 5.0);
+    }
+
+    #[test]
+    fn dispute() {
+        let mut acc = prepare_acc(10.0);
+        assert_eq!(acc.available, 10.0);
+        assert_eq!(acc.total, 10.0);
+        const TRANSACTION_TO_DISPUTE_ID: u32 = 5;
+
+        let deposit_transaction = Transaction::new(
+            TransactionType::Deposit,
+            0,
+            TRANSACTION_TO_DISPUTE_ID,
+            Some(5.0),
+        );
+        acc.add_transaction(deposit_transaction);
+        acc.process_pending_transaction().unwrap();
+
+        let dispute_transaction =
+            Transaction::new(TransactionType::Dispute, 0, TRANSACTION_TO_DISPUTE_ID, None);
+
+        acc.add_transaction(dispute_transaction);
+        acc.process_pending_transaction().unwrap();
+        assert_eq!(acc.total, 15.0);
+        assert_eq!(acc.available, 10.0);
+        assert_eq!(acc.held, 5.0);
     }
 }
