@@ -118,51 +118,47 @@ impl Account {
         }
     }
 
-    fn resolve(&mut self, dispute_id: u32) -> Result<(), String> {
-        if let Some(dispute_transaction) = self.transactions_history.get_mut(&dispute_id) {
-            if dispute_transaction.transaction_type != TransactionType::Dispute {
-                return Err("Resolve transaction target was different than Dispute!".into());
+    fn find_dispute_transaction(&mut self, dispute_id: u32) -> Result<&mut Transaction, String> {
+        match self.transactions_history.get_mut(&dispute_id) {
+            Some(transaction) => {
+                if transaction.transaction_type != TransactionType::Dispute {
+                    Err("Transaction is not a Dispute transaction".into())
+                } else {
+                    Ok(transaction)
+                }
             }
-
-            let amount = dispute_transaction
-                .amount
-                .expect("Dispute transaction stored in history contains amount resolve");
-
-            dispute_transaction.transaction_type = TransactionType::Deposit;
-            self.held -= amount;
-            self.available += amount;
-            self.assert_balance();
-            return Ok(());
+            None => Err(format!(
+                "Transaction with id: {} is not stored in transaction history",
+                dispute_id
+            )),
         }
+    }
 
-        Err(format!(
-            "Transaction {} is not stored in transaction history",
-            dispute_id
-        ))
+    fn resolve(&mut self, dispute_id: u32) -> Result<(), String> {
+        let dispute_transaction = self.find_dispute_transaction(dispute_id)?;
+        let amount = dispute_transaction
+            .amount
+            .expect("Dispute transaction stored in history contains amount");
+
+        dispute_transaction.transaction_type = TransactionType::Deposit;
+        self.held -= amount;
+        self.available += amount;
+        self.assert_balance();
+        Ok(())
     }
 
     fn chargeback(&mut self, dispute_id: u32) -> Result<(), String> {
-        if let Some(dispute_transaction) = self.transactions_history.get_mut(&dispute_id) {
-            if dispute_transaction.transaction_type != TransactionType::Dispute {
-                return Err("Resolve transaction target was different than Dispute!".into());
-            }
+        let dispute_transaction = self.find_dispute_transaction(dispute_id)?;
+        let amount = dispute_transaction
+            .amount
+            .expect("Dispute transaction stored in history contains amount");
 
-            let amount = dispute_transaction
-                .amount
-                .expect("Dispute transaction stored in history contains amount");
-
-            dispute_transaction.transaction_type = TransactionType::Chargeback;
-            self.held -= amount;
-            self.total -= amount;
-            self.locked = true;
-            self.assert_balance();
-            return Ok(());
-        }
-
-        Err(format!(
-            "Transaction {} is not stored in transaction history",
-            dispute_id
-        ))
+        dispute_transaction.transaction_type = TransactionType::Chargeback;
+        self.held -= amount;
+        self.total -= amount;
+        self.locked = true;
+        self.assert_balance();
+        Ok(())
     }
 
     fn process_pending_transaction(&mut self) -> Result<(), String> {
