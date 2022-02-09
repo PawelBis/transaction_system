@@ -9,7 +9,7 @@ mod account;
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, PartialEq, Eq)]
-enum TransactionType {
+pub enum TransactionType {
     #[serde(rename = "deposit")]
     Deposit,
     #[serde(rename = "withdrawal")]
@@ -30,6 +30,22 @@ pub struct Transaction {
     client: u16,
     tx: u32,
     amount: Option<f32>,
+}
+
+impl Transaction {
+    pub fn new(
+        transaction_type: TransactionType,
+        client: u16,
+        tx: u32,
+        amount: Option<f32>,
+    ) -> Self {
+        Self {
+            transaction_type,
+            client,
+            tx,
+            amount,
+        }
+    }
 }
 
 fn deserialize_csv_file(path: String) -> Result<Vec<Transaction>, Box<dyn Error>> {
