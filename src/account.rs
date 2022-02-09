@@ -197,7 +197,7 @@ mod tests {
         assert!(acc.available == 5.0);
         assert!(acc.total == 5.0);
 
-        acc.add_transaction(Transaction::new(TransactionType::Deposit, 0, 0, Some(-5.0)));
+        acc.add_transaction(Transaction::new(TransactionType::Deposit, 0, 1, Some(-5.0)));
         assert!(acc.process_pending_transaction().is_err());
         assert!(acc.available == 5.0);
         assert!(acc.total == 5.0);
@@ -216,7 +216,7 @@ mod tests {
         acc.add_transaction(Transaction::new(
             TransactionType::Withdrawal,
             0,
-            0,
+            1,
             Some(5.0),
         ));
         acc.process_pending_transaction().unwrap();
@@ -226,7 +226,7 @@ mod tests {
         acc.add_transaction(Transaction::new(
             TransactionType::Withdrawal,
             0,
-            0,
+            2,
             Some(6.0),
         ));
         assert!(acc.process_pending_transaction().is_err());
@@ -236,7 +236,7 @@ mod tests {
         acc.add_transaction(Transaction::new(
             TransactionType::Withdrawal,
             0,
-            0,
+            3,
             Some(-1.0),
         ));
         assert!(acc.process_pending_transaction().is_err());
