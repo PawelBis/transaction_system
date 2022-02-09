@@ -38,6 +38,8 @@ struct Account {
     locked: bool,
     #[serde(skip_serializing)]
     pending_transactions: VecDeque<Transaction>,
+    #[serde(skip_serializing)]
+    transactions_history: HashMap<u32, Transaction>,
 }
 
 impl Account {
@@ -90,6 +92,42 @@ impl Account {
             Err(format!("withdraw called with amount {} which is not valid", amount).to_string())
         }
     }
+
+    fn process_pending_transaction(&mut self) -> Result<(), String> {
+        self.is_account_state_valid_for_transaction()?;
+        let transaction = match self.pending_transactions.pop_front() {
+            Some(t) => t,
+            None => return Err("Pending queue is empty, cannot process transaction".into()),
+        };
+        match transaction.transaction_type {
+            TransactionType::Deposit => {
+                let amount = match transaction.amount {
+                    Some(a) => a,
+                    None => {
+                        return Err("Deposit is possible only with amount field present".into());
+                    }
+                };
+
+                self.deposit(amount)?
+            }
+            TransactionType::Withdrawal => {
+                let amount = match transaction.amount {
+                    Some(a) => a,
+                    None => {
+                        return Err("Withraw is possible only with amount field present".into());
+                    }
+                };
+
+                self.withdraw(amount)?;
+            }
+            TransactionType::Dispute => (),
+            TransactionType::Resolve => (),
+            TransactionType::Chargeback => (),
+        }
+        self.transactions_history
+            .insert(transaction.tx, transaction);
+        Ok(())
+    }
 }
 
 fn deserialize_csv_file(path: String) -> Result<Vec<Transaction>, Box<dyn Error>> {
@@ -137,41 +175,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     for (_, acc) in bank.iter_mut() {
         println!("Analyzing account transaciton");
         let mut account_lock = acc.write().unwrap();
-        while let Some(transaction) = account_lock.pending_transactions.pop_front() {
-            println!("Analyzing transaciton");
-            match transaction.transaction_type {
-                TransactionType::Deposit => {
-                    let amount = match transaction.amount {
-                        Some(a) => a,
-                        None => {
-                            println!("Deposit is possible only with amount field present");
-                            continue;
-                        }
-                    };
-
-                    if let Err(e) = account_lock.deposit(amount) {
-                        println!("Deposit transaction failed: {}", e);
-                    }
-                }
-                TransactionType::Withdrawal => {
-                    let amount = match transaction.amount {
-                        Some(a) => a,
-                        None => {
-                            println!("Withraw is possible only with amount field present");
-                            continue;
-                        }
-                    };
-
-                    if let Err(e) = account_lock.withdraw(amount) {
-                        println!("Deposit transaction failed: {}", e);
-                    }
-                }
-                TransactionType::Dispute => (),
-                TransactionType::Resolve => (),
-                TransactionType::Chargeback => (),
-            }
-            println!("Finished transaciton");
-        }
+        while !account_lock.process_pending_transaction().is_err() {}
         println!("Account state: {:?}", account_lock);
         println!("");
     }
