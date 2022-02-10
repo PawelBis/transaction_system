@@ -1,6 +1,6 @@
 use csv;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use serde::Deserialize;
+use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, RwLock};
 
@@ -66,13 +66,13 @@ fn deserialize_csv_file(path: String) -> Result<Vec<Transaction>, Box<dyn Error>
 fn main() -> Result<(), Box<dyn Error>> {
     let filename = std::env::args().nth(1).unwrap();
 
-    let mut transaction_to_client_map = HashMap::<u32, u16>::default();
     let mut bank = HashMap::<u16, Arc<RwLock<Account>>>::default();
 
     let transactions = deserialize_csv_file(filename)?;
+    let mut num_transactions = 0;
+    let mut num_clients = 0;
     for transaction in transactions {
-        transaction_to_client_map.insert(transaction.tx, transaction.client);
-
+        num_transactions += 1;
         match bank.get(&transaction.client) {
             Some(client) => {
                 client.write().unwrap().add_transaction(transaction);
@@ -82,17 +82,53 @@ fn main() -> Result<(), Box<dyn Error>> {
                     transaction.client,
                     Arc::new(RwLock::new(Account::new(transaction.client, transaction))),
                 );
+                num_clients += 1;
             }
         };
     }
 
+    let mut num_acc = 0;
+    let mut succ = 0;
+    let mut failed = 0;
+    let mut locked = 0;
     for (_, acc) in bank.iter_mut() {
-        println!("Analyzing account transaciton");
+        num_acc += 1;
         let mut account_lock = acc.write().unwrap();
-        while !account_lock.process_pending_transaction().is_err() {}
-        println!("Account state: {:?}", account_lock);
-        println!("");
+        let mut finish = false;
+        while !finish {
+            match account_lock.process_pending_transaction() {
+                Ok(_) => {
+                    succ += 1;
+                    println!("Processing trancaction on acc {}", num_acc);
+                }
+                Err(e) => {
+                    failed += 1;
+                    match e.as_str() {
+                        "Pending queue is empty, cannot process transaction" => finish = true,
+                        "Account locked!" => {
+                            finish = true;
+                            locked += account_lock.pending_transactions.len();
+                            println!(
+                                "Account {} locked with {} transactions left!",
+                                num_acc,
+                                account_lock.pending_transactions.len()
+                            );
+                        }
+                        _ => {
+                            println!("Other error on acc {}: {}", num_acc, e);
+                        }
+                    }
+                }
+            };
+        }
     }
+    println!(
+        "Total transactions processed: {}, locked: {}, {}/{}",
+        succ + failed,
+        locked,
+        succ,
+        failed
+    );
 
     Ok(())
 }

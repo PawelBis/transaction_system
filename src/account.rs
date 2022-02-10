@@ -10,7 +10,7 @@ pub struct Account {
     total: f32,
     locked: bool,
     #[serde(skip_serializing)]
-    pending_transactions: VecDeque<Transaction>,
+    pub pending_transactions: VecDeque<Transaction>,
     #[serde(skip_serializing)]
     transactions_history: HashMap<u32, Transaction>,
 }
@@ -28,7 +28,8 @@ impl Account {
         self.pending_transactions.push_back(new_transaction);
     }
 
-    fn assert_balance(&self) {
+    fn assert_balance(&mut self) {
+        self.total = self.available + self.held;
         assert_eq!(self.total, self.available + self.held);
     }
 
@@ -45,7 +46,6 @@ impl Account {
 
         if amount > 0.0 {
             self.available += amount;
-            self.total += amount;
             self.assert_balance();
             Ok(())
         } else {
@@ -58,7 +58,6 @@ impl Account {
 
         if amount > 0.0 {
             if self.available - amount >= 0.0 {
-                self.total -= amount;
                 self.available -= amount;
                 self.assert_balance();
                 Ok(())
@@ -132,7 +131,6 @@ impl Account {
 
         dispute_transaction.transaction_type = TransactionType::Chargeback;
         self.held -= amount;
-        self.total -= amount;
         self.locked = true;
         self.assert_balance();
         Ok(())
@@ -263,12 +261,8 @@ mod tests {
         acc.add_transaction(deposit_transaction);
         acc.process_pending_transaction().unwrap();
 
-        let dispute_transaction = Transaction::new(
-            TransactionType::Dispute,
-            0,
-            TRANSACTION_TO_DISPUTE_ID,
-            None
-        );
+        let dispute_transaction =
+            Transaction::new(TransactionType::Dispute, 0, TRANSACTION_TO_DISPUTE_ID, None);
 
         acc.add_transaction(dispute_transaction);
         acc.process_pending_transaction().unwrap();
@@ -276,12 +270,8 @@ mod tests {
         assert_eq!(acc.available, 10.0);
         assert_eq!(acc.held, 5.0);
 
-        let invalid_dispute = Transaction::new(
-            TransactionType::Dispute,
-            0,
-            INVALID_DISPUTE_ID,
-            None
-        );
+        let invalid_dispute =
+            Transaction::new(TransactionType::Dispute, 0, INVALID_DISPUTE_ID, None);
         acc.add_transaction(invalid_dispute);
         assert!(acc.process_pending_transaction().is_err());
 
@@ -296,12 +286,8 @@ mod tests {
         assert_eq!(acc.total, 14.0);
         assert_eq!(acc.available, 9.0);
 
-        let another_invalid_dispute = Transaction::new(
-            TransactionType::Dispute,
-            0,
-            WITHDRAW_TRANSACTION_ID,
-            None
-        );
+        let another_invalid_dispute =
+            Transaction::new(TransactionType::Dispute, 0, WITHDRAW_TRANSACTION_ID, None);
         acc.add_transaction(another_invalid_dispute);
         assert!(acc.process_pending_transaction().is_err());
     }
