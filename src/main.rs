@@ -69,10 +69,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut bank = HashMap::<u16, Arc<RwLock<Account>>>::default();
 
     let transactions = deserialize_csv_file(filename)?;
-    let mut num_transactions = 0;
-    let mut num_clients = 0;
     for transaction in transactions {
-        num_transactions += 1;
         match bank.get(&transaction.client) {
             Some(client) => {
                 client.write().unwrap().add_transaction(transaction);
@@ -82,53 +79,46 @@ fn main() -> Result<(), Box<dyn Error>> {
                     transaction.client,
                     Arc::new(RwLock::new(Account::new(transaction.client, transaction))),
                 );
-                num_clients += 1;
             }
         };
     }
 
-    let mut num_acc = 0;
-    let mut succ = 0;
-    let mut failed = 0;
-    let mut locked = 0;
+    let start = std::time::Instant::now();
+    let mut successful_transactions = 0;
+    let mut failed_transactions = 0;
+    let mut locked_transactions = 0;
     for (_, acc) in bank.iter_mut() {
-        num_acc += 1;
         let mut account_lock = acc.write().unwrap();
         let mut finish = false;
         while !finish {
             match account_lock.process_pending_transaction() {
                 Ok(_) => {
-                    succ += 1;
-                    println!("Processing trancaction on acc {}", num_acc);
+                    successful_transactions += 1;
                 }
-                Err(e) => {
-                    failed += 1;
-                    match e {
-                        TransactionProcessingError::NoTransactionToProcess => finish = true,
-                        TransactionProcessingError::AccountLocked(number_of_locked_transactions) => {
-                            finish = true;
-                            locked += number_of_locked_transactions;
-                            println!(
-                                "Account {} locked with {} transactions left!",
-                                num_acc,
-                                number_of_locked_transactions
-                            );
-                        }
-                        _ => {
-                            println!("Other error on acc {}: {}", num_acc, e);
-                        }
+                Err(e) => match e {
+                    TransactionProcessingError::NoTransactionToProcess => finish = true,
+                    TransactionProcessingError::AccountLocked(number_of_locked_transactions) => {
+                        finish = true;
+                        locked_transactions += number_of_locked_transactions;
                     }
-                }
+                    _ => {
+                        failed_transactions += 1;
+                    }
+                },
             };
         }
     }
+
+    let end = std::time::Instant::now();
+
     println!(
         "Total transactions processed: {}, locked: {}, {}/{}",
-        succ + failed,
-        locked,
-        succ,
-        failed
+        successful_transactions + failed_transactions,
+        locked_transactions,
+        successful_transactions,
+        failed_transactions
     );
+    println!("Time: {}", end.checked_duration_since(start).unwrap().as_millis());
 
     Ok(())
 }
