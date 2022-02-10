@@ -2,7 +2,8 @@ use csv;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::error::Error;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use account::{Account, TransactionProcessingError};
 mod account;
@@ -63,7 +64,8 @@ fn deserialize_csv_file(path: String) -> Result<Vec<Transaction>, Box<dyn Error>
     Ok(transactions)
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let filename = std::env::args().nth(1).unwrap();
 
     let mut bank = HashMap::<u16, Arc<RwLock<Account>>>::default();
@@ -72,7 +74,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     for transaction in transactions {
         match bank.get(&transaction.client) {
             Some(client) => {
-                client.write().unwrap().add_transaction(transaction);
+                client.write().await.add_transaction(transaction);
             }
             None => {
                 bank.insert(
@@ -83,42 +85,35 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
     }
 
+    let mut handles = vec!();
     let start = std::time::Instant::now();
-    let mut successful_transactions = 0;
-    let mut failed_transactions = 0;
-    let mut locked_transactions = 0;
     for (_, acc) in bank.iter_mut() {
-        let mut account_lock = acc.write().unwrap();
-        let mut finish = false;
-        while !finish {
-            match account_lock.process_pending_transaction() {
-                Ok(_) => {
-                    successful_transactions += 1;
-                }
-                Err(e) => match e {
-                    TransactionProcessingError::NoTransactionToProcess => finish = true,
-                    TransactionProcessingError::AccountLocked(number_of_locked_transactions) => {
-                        finish = true;
-                        locked_transactions += number_of_locked_transactions;
-                    }
-                    _ => {
-                        failed_transactions += 1;
-                    }
-                },
-            };
-        }
+        let mut account_lock = acc.clone().write_owned().await;
+
+        handles.push(tokio::spawn(async move {
+            let mut finish = false;
+            while !finish {
+                match account_lock.process_pending_transaction() {
+                    Ok(_) => {}
+                    Err(e) => match e {
+                        TransactionProcessingError::NoTransactionToProcess => finish = true,
+                        TransactionProcessingError::AccountLocked(_) => {
+                            finish = true;
+                        }
+                        _ => {}
+                    },
+                };
+            }
+        }));
     }
 
+    for handle in handles.into_iter() {
+        handle.await.unwrap();
+    }
     let end = std::time::Instant::now();
-
     println!(
-        "Total transactions processed: {}, locked: {}, {}/{}",
-        successful_transactions + failed_transactions,
-        locked_transactions,
-        successful_transactions,
-        failed_transactions
+        "Time: {}",
+        end.checked_duration_since(start).unwrap().as_millis()
     );
-    println!("Time: {}", end.checked_duration_since(start).unwrap().as_millis());
-
     Ok(())
 }
