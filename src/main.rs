@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, RwLock};
 
-use account::Account;
+use account::{Account, TransactionProcessingError};
 mod account;
 
 #[allow(dead_code)]
@@ -103,15 +103,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 Err(e) => {
                     failed += 1;
-                    match e.as_str() {
-                        "Pending queue is empty, cannot process transaction" => finish = true,
-                        "Account locked!" => {
+                    match e {
+                        TransactionProcessingError::NoTransactionToProcess => finish = true,
+                        TransactionProcessingError::AccountLocked(number_of_locked_transactions) => {
                             finish = true;
-                            locked += account_lock.pending_transactions.len();
+                            locked += number_of_locked_transactions;
                             println!(
                                 "Account {} locked with {} transactions left!",
                                 num_acc,
-                                account_lock.pending_transactions.len()
+                                number_of_locked_transactions
                             );
                         }
                         _ => {

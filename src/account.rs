@@ -1,6 +1,7 @@
 use super::{Transaction, TransactionType};
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
+use std::fmt;
 
 #[derive(Default, Debug, Serialize)]
 pub struct Account {
@@ -13,6 +14,23 @@ pub struct Account {
     pub pending_transactions: VecDeque<Transaction>,
     #[serde(skip_serializing)]
     transactions_history: HashMap<u32, Transaction>,
+}
+
+#[derive(Debug)]
+pub enum TransactionProcessingError {
+    NoTransactionToProcess,
+    AccountLocked(u32),
+    InvalidAmount,
+    NegativeAmount,
+    InsufficientAmount,
+    InvalidDisputeTarget,
+    TransactionNotUnderDispute,
+}
+
+impl fmt::Display for TransactionProcessingError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Transaction processing failed {:?}", self)
+    }
 }
 
 impl Account {
@@ -33,15 +51,17 @@ impl Account {
         assert_eq!(self.total, self.available + self.held);
     }
 
-    fn is_account_state_valid_for_transaction(&self) -> Result<(), String> {
+    fn is_account_state_valid_for_transaction(&self) -> Result<(), TransactionProcessingError> {
         if self.locked {
-            Err("Account locked!".into())
+            Err(TransactionProcessingError::AccountLocked(
+                self.pending_transactions.len() as u32,
+            ))
         } else {
             Ok(())
         }
     }
 
-    fn deposit(&mut self, amount: f32) -> Result<(), String> {
+    fn deposit(&mut self, amount: f32) -> Result<(), TransactionProcessingError> {
         self.is_account_state_valid_for_transaction()?;
 
         if amount > 0.0 {
@@ -49,11 +69,11 @@ impl Account {
             self.assert_balance();
             Ok(())
         } else {
-            Err(format!("deposit amount: {} is not valid", amount).into())
+            Err(TransactionProcessingError::NegativeAmount)
         }
     }
 
-    fn withdraw(&mut self, amount: f32) -> Result<(), String> {
+    fn withdraw(&mut self, amount: f32) -> Result<(), TransactionProcessingError> {
         self.is_account_state_valid_for_transaction()?;
 
         if amount > 0.0 {
@@ -62,55 +82,44 @@ impl Account {
                 self.assert_balance();
                 Ok(())
             } else {
-                Err(format!(
-                    "Account available resources: {} are lower than withdraw amount: {}",
-                    self.available, amount
-                )
-                .to_string())
+                Err(TransactionProcessingError::InsufficientAmount)
             }
         } else {
-            Err(format!("withdraw called with amount {} which is not valid", amount).to_string())
+            Err(TransactionProcessingError::NegativeAmount)
         }
     }
 
-    fn dispute(&mut self, transaction_id: u32) -> Result<(), String> {
-        match self.transactions_history.get_mut(&transaction_id) {
-            Some(transaction) => {
-                if transaction.transaction_type == TransactionType::Deposit {
-                    let amount = transaction
-                        .amount
-                        .expect("Transaction stored in transaction_history is valid");
+    fn dispute(&mut self, transaction_id: u32) -> Result<(), TransactionProcessingError> {
+        if let Some(transaction) = self.transactions_history.get_mut(&transaction_id) {
+            if transaction.transaction_type == TransactionType::Deposit {
+                let amount = transaction
+                    .amount
+                    .expect("Transaction stored in transaction_history is valid");
 
-                    transaction.transaction_type = TransactionType::Dispute;
-                    self.available -= amount;
-                    self.held += amount;
-                    self.assert_balance();
-                    Ok(())
-                } else {
-                    Err("Dirpute transaction target was different than Deposit!".into())
-                }
+                transaction.transaction_type = TransactionType::Dispute;
+                self.available -= amount;
+                self.held += amount;
+                self.assert_balance();
+                return Ok(());
             }
-            None => Err("Dispute transaction target not valid".into()),
         }
+        Err(TransactionProcessingError::InvalidDisputeTarget)
     }
 
-    fn find_dispute_transaction(&mut self, dispute_id: u32) -> Result<&mut Transaction, String> {
-        match self.transactions_history.get_mut(&dispute_id) {
-            Some(transaction) => {
-                if transaction.transaction_type != TransactionType::Dispute {
-                    Err("Transaction is not a Dispute transaction".into())
-                } else {
-                    Ok(transaction)
-                }
+    fn find_dispute_transaction(
+        &mut self,
+        dispute_id: u32,
+    ) -> Result<&mut Transaction, TransactionProcessingError> {
+        if let Some(transaction) = self.transactions_history.get_mut(&dispute_id) {
+            if transaction.transaction_type == TransactionType::Dispute {
+                return Ok(transaction);
             }
-            None => Err(format!(
-                "Transaction with id: {} is not stored in transaction history",
-                dispute_id
-            )),
         }
+
+        Err(TransactionProcessingError::TransactionNotUnderDispute)
     }
 
-    fn resolve(&mut self, dispute_id: u32) -> Result<(), String> {
+    fn resolve(&mut self, dispute_id: u32) -> Result<(), TransactionProcessingError> {
         let dispute_transaction = self.find_dispute_transaction(dispute_id)?;
         let amount = dispute_transaction
             .amount
@@ -123,7 +132,7 @@ impl Account {
         Ok(())
     }
 
-    fn chargeback(&mut self, dispute_id: u32) -> Result<(), String> {
+    fn chargeback(&mut self, dispute_id: u32) -> Result<(), TransactionProcessingError> {
         let dispute_transaction = self.find_dispute_transaction(dispute_id)?;
         let amount = dispute_transaction
             .amount
@@ -136,18 +145,18 @@ impl Account {
         Ok(())
     }
 
-    pub fn process_pending_transaction(&mut self) -> Result<(), String> {
+    pub fn process_pending_transaction(&mut self) -> Result<(), TransactionProcessingError> {
         self.is_account_state_valid_for_transaction()?;
         let transaction = match self.pending_transactions.pop_front() {
             Some(t) => t,
-            None => return Err("Pending queue is empty, cannot process transaction".into()),
+            None => return Err(TransactionProcessingError::NoTransactionToProcess),
         };
         match transaction.transaction_type {
             TransactionType::Deposit => {
                 let amount = match transaction.amount {
                     Some(a) => a,
                     None => {
-                        return Err("Deposit is possible only with amount field present".into());
+                        return Err(TransactionProcessingError::InvalidAmount);
                     }
                 };
 
@@ -159,7 +168,7 @@ impl Account {
                 let amount = match transaction.amount {
                     Some(a) => a,
                     None => {
-                        return Err("Withraw is possible only with amount field present".into());
+                        return Err(TransactionProcessingError::InvalidAmount);
                     }
                 };
 
