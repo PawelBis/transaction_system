@@ -34,10 +34,9 @@ impl fmt::Display for TransactionProcessingError {
 }
 
 impl Account {
-    pub fn new(id: u16, initial_transaction: Transaction) -> Self {
+    pub fn new(id: u16) -> Self {
         Self {
             client: id,
-            pending_transactions: VecDeque::from([initial_transaction]),
             ..Self::default()
         }
     }
@@ -186,6 +185,7 @@ impl Account {
                 self.chargeback(transaction.tx)?;
             }
         }
+        println!("Proj");
         Ok(())
     }
 }
