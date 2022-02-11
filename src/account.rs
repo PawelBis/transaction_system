@@ -185,7 +185,6 @@ impl Account {
                 self.chargeback(transaction.tx)?;
             }
         }
-        println!("Proj");
         Ok(())
     }
 }
@@ -197,8 +196,13 @@ mod tests {
     fn prepare_acc(initial_funds: f32) -> Account {
         let mut acc = Account::new(
             0,
-            Transaction::new(TransactionType::Deposit, 0, 0, Some(initial_funds)),
         );
+        acc.add_transaction(Transaction::new(
+            TransactionType::Deposit,
+            0,
+            0,
+            Some(initial_funds),
+        ));
         acc.process_pending_transaction().unwrap();
         acc
     }
