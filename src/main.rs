@@ -1,12 +1,11 @@
+use account::Account;
 use csv;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
-use tokio::sync::mpsc;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, Mutex};
 
-use account::{Account, TransactionProcessingError};
 mod account;
 
 #[allow(dead_code)]
@@ -50,22 +49,7 @@ impl Transaction {
     }
 }
 
-fn deserialize_csv_file(path: String) -> Result<Vec<Transaction>, Box<dyn Error>> {
-    let mut reader = csv::ReaderBuilder::new()
-        .trim(csv::Trim::All)
-        .from_path(path)
-        .unwrap();
-
-    let mut transactions = Vec::<Transaction>::default();
-
-    for transaction in reader.deserialize() {
-        transactions.push(transaction?);
-    }
-
-    Ok(transactions)
-}
-
-fn async_deserialize_csv_file(path: String, sender: mpsc::UnboundedSender<Transaction>) {
+fn deserialize_csv_file(path: String, sender: mpsc::UnboundedSender<Transaction>) {
     let mut reader = csv::ReaderBuilder::new()
         .trim(csv::Trim::All)
         .from_path(path)
@@ -80,89 +64,42 @@ fn async_deserialize_csv_file(path: String, sender: mpsc::UnboundedSender<Transa
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let filename = std::env::args().nth(1).unwrap();
-    let start = std::time::Instant::now();
+    let filename = match std::env::args().nth(1) {
+        Some(f) => f,
+        None => {
+            return Err("Please provide csv filename".into());
+        }
+    };
 
-    let mut bank = HashMap::<u16, Arc<RwLock<Account>>>::default();
+    let mut bank = HashMap::<u16, Arc<Mutex<Account>>>::default();
+
     let (tx, mut px) = mpsc::unbounded_channel::<Transaction>();
-
     tokio::task::spawn_blocking(move || {
-        async_deserialize_csv_file(filename, tx);
+        deserialize_csv_file(filename.to_string(), tx);
     });
 
-    let mut handles = vec![];
-    while let Some(t) = px.recv().await {
-        let c = match bank.get(&t.client) {
-            Some(client) => {
-                client.clone()
-                //client.write().await.
-            }
+    while let Some(transaction) = px.recv().await {
+        let client = match bank.get(&transaction.client) {
+            Some(client) => client.clone(),
             None => {
-                let new_client = Arc::new(RwLock::new(Account::new(t.client)));
-                let _ = bank.insert(t.client, new_client.clone());
+                let new_client = Arc::new(Mutex::new(Account::new(transaction.client)));
+                bank.insert(transaction.client, new_client.clone());
 
                 new_client
             }
         };
 
-        handles.push(tokio::spawn(async move {
-            let mut c = c.write_owned().await;
-            c.add_transaction(t);
-            let _ = c.process_pending_transaction();
-        }));
+        tokio::spawn(async move {
+            let mut client = client.lock_owned().await;
+            client.add_transaction(transaction);
+            client.process_pending_transaction()
+        });
     }
 
-    //for transaction in transactions {
-    //    match bank.get(&transaction.client) {
-    //        Some(client) => {
-    //            client.write().await.add_transaction(transaction);
-    //        }
-    //        None => {
-    //            bank.insert(
-    //                transaction.client,
-    //                Arc::new(RwLock::new(Account::new(transaction.client, transaction))),
-    //            );
-    //        }
-    //    };
-    //}
-
-    //for (_, acc) in bank.iter_mut() {
-    //    let mut account_lock = acc.clone().write_owned().await;
-
-    //    handles.push(tokio::spawn(async move {
-    //        let mut finish = false;
-    //        while !finish {
-    //            match account_lock.process_pending_transaction() {
-    //                Ok(_) => {}
-    //                Err(e) => match e {
-    //                    TransactionProcessingError::NoTransactionToProcess => finish = true,
-    //                    TransactionProcessingError::AccountLocked(_) => {
-    //                        finish = true;
-    //                    }
-    //                    _ => {}
-    //                },
-    //            };
-    //        }
-    //    }));
-    //}
-
-    let joining = std::time::Instant::now();
-    for handle in handles.into_iter() {
-        handle.await.unwrap();
+    let mut writer = csv::Writer::from_writer(std::io::stdout());
+    for (_, account) in bank {
+        writer.serialize(account.lock().await.to_owned())?;
     }
-    let joininge = std::time::Instant::now();
-    println!(
-        "Joining Time: {}",
-        joininge
-            .checked_duration_since(joining)
-            .unwrap()
-            .as_millis()
-    );
 
-    let end = std::time::Instant::now();
-    println!(
-        "Time: {}",
-        end.checked_duration_since(start).unwrap().as_millis()
-    );
     Ok(())
 }

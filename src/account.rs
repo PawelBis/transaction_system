@@ -1,19 +1,14 @@
 use super::{Transaction, TransactionType};
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 
-#[derive(Default, Debug, Serialize)]
-pub struct Account {
-    client: u16,
-    available: f32,
-    held: f32,
-    total: f32,
-    locked: bool,
-    #[serde(skip_serializing)]
-    pub pending_transactions: VecDeque<Transaction>,
-    #[serde(skip_serializing)]
-    transactions_history: HashMap<u32, Transaction>,
+fn serialize_w_precision<S>(x: &f32, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let x = (x * 10000.0).round() / 10000.0;
+    s.serialize_f32(x)
 }
 
 #[derive(Debug)]
@@ -30,6 +25,35 @@ pub enum TransactionProcessingError {
 impl fmt::Display for TransactionProcessingError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Transaction processing failed {:?}", self)
+    }
+}
+
+#[derive(Default, Debug, Serialize)]
+pub struct Account {
+    client: u16,
+    #[serde(serialize_with = "serialize_w_precision")]
+    available: f32,
+    #[serde(serialize_with = "serialize_w_precision")]
+    held: f32,
+    #[serde(serialize_with = "serialize_w_precision")]
+    total: f32,
+    locked: bool,
+    #[serde(skip_serializing)]
+    pub pending_transactions: VecDeque<Transaction>,
+    #[serde(skip_serializing)]
+    transactions_history: HashMap<u32, Transaction>,
+}
+
+impl Clone for Account {
+    fn clone(&self) -> Self {
+        Self {
+            client: self.client,
+            available: self.available,
+            held: self.held,
+            total: self.total,
+            locked: self.locked,
+            ..Self::default()
+        }
     }
 }
 
@@ -194,9 +218,7 @@ mod tests {
     use super::{Account, Transaction, TransactionType};
 
     fn prepare_acc(initial_funds: f32) -> Account {
-        let mut acc = Account::new(
-            0,
-        );
+        let mut acc = Account::new(0);
         acc.add_transaction(Transaction::new(
             TransactionType::Deposit,
             0,
