@@ -39,7 +39,7 @@ pub struct Account {
     total: f32,
     locked: bool,
     #[serde(skip_serializing)]
-    pub pending_transactions: VecDeque<Transaction>,
+    pending_transactions: VecDeque<Transaction>,
     #[serde(skip_serializing)]
     transactions_history: HashMap<u32, Transaction>,
 }
